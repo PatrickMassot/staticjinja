@@ -12,35 +12,57 @@ class DepGraph(object):
     A directed graph which will handle dependencies between templates and data
     files in a site.
 
-    :param site:
-        A :class:`Site <Site>` object.
+    :param parents:
+        A dictionary whose keys are vertices of the graph and each value is the
+        set of child vertices of the key vertex.
+
+    :param children:
+        A dictionary whose keys are vertices of the graph and each value is the
+        set of parents vertices of the key vertex.
 
     """
-    def __init__(self, site):
-        self.parents = dict(
-                (s, set()) for s in site.jinja_names + site.data_names
-                )
-        self.children = deepcopy(self.parents)
+    def __init__(self, parents, children):
+        self.parents = parents
+        self.children = children
 
-        for filename in site.jinja_names:
-            self.parents[filename] = site.get_file_dep(filename)
-            for d in self.parents[filename]:
-                self.children[d].add(filename)
+    @classmethod
+    def from_parents(cls, parents):
+        """
+        Buils a graph from a dictionnary of directed edges
+        by building the dictionnary of children edges.
 
-        self.site = site
+        :param parents:
+            A dictionary whose keys are vertices of the graph and each value is
+            the set of child vertices of the key vertex.
+        """
+        children = {}
+        for filename in parents:
+            children[filename] = set()
+        for filename in parents:
+            for d in parents[filename]:
+                children[d].add(filename)
+            print(children)
+        return cls(parents, children)
 
-    def connected_components(self, adjacency, start):
-        """Returns the (directed) connected component of start in the graph with
-        given adjacency dict.
+    def connected_components(self, direction, start):
+        """Returns the (directed) connected component of start in the graph.
 
         Uses a classical depth first search.
 
-        :param adjacency: the adjacency dict to be used (will be either
-        self.children or self.parents in all foreseen uses)
+        :param direction: either 'descendants' or 'ancestors'
 
         :param start: the vertex in the graph whose connected component we
         seek.
         """
+
+        if direction == 'descendants':
+            adjacency = self.children
+        elif direction == 'ancestors':
+            adjacency = self.parents
+        else:
+            raise ValueError(
+                    'direction should be either descendants or ancestors'
+                    )
 
         seen = set([start])
         stack = [iter(adjacency[start])]
@@ -50,28 +72,29 @@ class DepGraph(object):
                 child = next(children)
                 if child not in seen:
                     yield child
-                seen.add(child)
-                stack.append(iter(adjacency[child]))
+                    seen.add(child)
+                    stack.append(iter(adjacency[child]))
             except StopIteration:
                 stack.pop()
 
     def get_descendants(self, filename):
-        """Returns all descendant of the given template or data file.
+        """Returns all descendants of the given template or data file.
 
         :param filename: the template or data file whose descendant we seek.
         """
-        return self.connected_components(self.children, filename)
+        return self.connected_components('descendants', filename)
 
-    def update(self, filename):
+    def update(self, filename, new_parents):
         """
         Updates the part of this dependency graph directly linked to some
         template or data file.
 
         :param filename: A string giving the relative path of the template or
         data file.
+
+        :param new_parents: the new set of parents of filename.
         """
         old_parents = self.parents.get(filename, set())
-        new_parents = self.site.get_file_dep(filename)
         if new_parents != old_parents:
             for lost_parent in old_parents.difference(new_parents):
                 self.children[lost_parent].remove(filename)
